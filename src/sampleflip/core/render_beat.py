@@ -1158,8 +1158,9 @@ def render(sample_path, name, genre='trap', bpm_hint=None, nbars=None,
     else:
         print('\nStep 5: Programming bass ...')
         bass_count = 0
-        bass_pat = BASS_PATTERNS.get(cfg.get('bass_pattern_type', 'root_only'), [(0, 0.0)])
-        print(f'  Bass pattern: {cfg.get("bass_pattern_type", "root_only")} ({len(bass_pat)} notes/bar)')
+        bass_pat_name = os.environ.get('SAMPLEFLIP_BASS_PATTERN', cfg.get('bass_pattern_type', 'root_only'))
+        bass_pat = BASS_PATTERNS.get(bass_pat_name, [(0, 0.0)])
+        print(f'  Bass pattern: {bass_pat_name} ({len(bass_pat)} notes/bar)')
 
         # Pre-load 808 sample and detect root once if using 808 type
         bass_808_sample = None

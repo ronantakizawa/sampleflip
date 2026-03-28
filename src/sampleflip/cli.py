@@ -1,7 +1,8 @@
 """SampleFlip CLI — Describe a beat, get a beat."""
 
+import json
 import os
-import re
+import tempfile
 import click
 
 GENRES = [
@@ -15,7 +16,6 @@ GENRES = [
 @click.option('--genre', type=click.Choice(GENRES), default=None, help='Override genre')
 @click.option('--bpm', type=float, default=None, help='Override BPM')
 @click.option('--bars', type=int, default=None, help='Number of bars')
-@click.option('--drums', type=click.Path(exists=True), default=None, help='Drum pattern JSON')
 @click.option('--loop-start', type=float, default=None, help='Loop start (seconds)')
 @click.option('--loop-end', type=float, default=None, help='Loop end (seconds)')
 @click.option('--vinyl-slow', is_flag=True, help='Pitch+speed linked slowdown')
@@ -24,7 +24,7 @@ GENRES = [
 @click.option('--output', type=click.Path(), default=None, help='Output directory')
 @click.option('--kit', type=click.Path(exists=True), default=None, help='Drum kit samples directory')
 @click.version_option()
-def main(prompt, genre, bpm, bars, drums, loop_start, loop_end,
+def main(prompt, genre, bpm, bars, loop_start, loop_end,
          vinyl_slow, no_bass, lofi, output, kit):
     """Describe a beat, get a beat.
 
@@ -36,7 +36,7 @@ def main(prompt, genre, bpm, bars, drums, loop_start, loop_end,
 
       sampleflip "aggressive drill beat" --bpm 142
     """
-    from sampleflip.agent import plan_beat
+    from sampleflip.agent import plan_beat, pick_best_result, generate_drums, pick_bass_pattern
     from sampleflip.search import search_youtube
     from sampleflip.download import download_youtube
     from sampleflip.render import render_beat
@@ -61,7 +61,7 @@ def main(prompt, genre, bpm, bars, drums, loop_start, loop_end,
     # Step 2: Search YouTube
     click.echo(f'\nSearching YouTube...')
     try:
-        results = search_youtube(q, count=3)
+        results = search_youtube(q, count=5)
     except RuntimeError as e:
         click.echo(f'Search failed: {e}', err=True)
         raise SystemExit(1)
@@ -70,11 +70,17 @@ def main(prompt, genre, bpm, bars, drums, loop_start, loop_end,
         click.echo('No results found. Try a different description.', err=True)
         raise SystemExit(1)
 
-    # Pick first result
-    selected = results[0]
-    click.echo(f'  Found: {selected["title"]} ({selected["duration_str"]})')
+    # Step 3: LLM picks the best result
+    click.echo(f'  Found {len(results)} results, picking best...')
+    try:
+        best_idx = pick_best_result(results, g, prompt)
+    except Exception:
+        best_idx = 0  # fallback to first result
 
-    # Step 3: Download
+    selected = results[best_idx]
+    click.echo(f'  Selected: {selected["title"]} ({selected["duration_str"]})')
+
+    # Step 4: Download
     click.echo(f'\nDownloading...')
     try:
         sample_path, size_mb = download_youtube(selected['url'])
@@ -83,15 +89,49 @@ def main(prompt, genre, bpm, bars, drums, loop_start, loop_end,
         click.echo(f'Download failed: {e}', err=True)
         raise SystemExit(1)
 
-    # Step 4: Generate beat
+    # Step 5: LLM picks bass pattern
+    click.echo(f'\nDesigning bass pattern...')
+    try:
+        bass_pat = pick_bass_pattern(prompt, g)
+        click.echo(f'  Bass: {bass_pat}')
+    except Exception:
+        bass_pat = None  # use genre default
+
+    # Step 6: LLM generates custom drum pattern
+    # Need arrangement from genre config to know where sections are
+    import sys
+    core_dir = os.path.join(os.path.dirname(__file__), 'core')
+    if core_dir not in sys.path:
+        sys.path.insert(0, core_dir)
+    from sampleflip.core.render_beat import GENRE_CONFIGS
+    cfg = GENRE_CONFIGS[g]
+    nbars_actual = bars or cfg['bars']
+    arrangement = cfg['arrangement']
+
+    click.echo(f'Generating drum pattern...')
+    drums_json = None
+    try:
+        drum_data = generate_drums(prompt, g, b, nbars_actual, arrangement)
+        n_pats = len([k for k in drum_data['patterns'] if k != 'silent'])
+        click.echo(f'  Created {n_pats} patterns for {nbars_actual} bars')
+
+        # Write to temp JSON
+        drums_json = os.path.join(tempfile.gettempdir(), f'sampleflip_drums_{name}.json')
+        with open(drums_json, 'w') as f:
+            json.dump(drum_data, f)
+    except Exception as e:
+        click.echo(f'  Drum generation failed ({e}), using genre defaults')
+
+    # Step 7: Generate beat
     click.echo(f'\nGenerating {g} beat: "{name}"...\n')
     try:
         render_beat(
             sample_path, name, genre=g, bpm=b, bars=bars,
             loop_start=loop_start, loop_end=loop_end,
-            drums_json=drums, vinyl_slow=vinyl_slow,
+            drums_json=drums_json, vinyl_slow=vinyl_slow,
             no_bass=no_bass, lofi=lofi,
             output_dir=output, kit_dir=kit,
+            bass_pattern_type=bass_pat,
         )
     except Exception as e:
         click.echo(f'\nRender failed: {e}', err=True)
