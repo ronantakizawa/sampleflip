@@ -21,6 +21,7 @@ dependencies = [
     "pyloudnorm",
     "pydub",
     "click",
+    "anthropic",
 ]
 
 [project.scripts]
