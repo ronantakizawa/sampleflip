@@ -247,9 +247,18 @@ DRUM RULES:
 - Beats 0-3.75 in 4/4. Subdivisions: 0.5=8th, 0.25=16th. NO 32nd notes.
 - Only 2 patterns (A and B). B is slight variation of A.
 - NO fills, NO rolls, NO ghost notes. Max 12 events per pattern.
-- Kick: 1-2 hits/bar. Clap: beat 1+3 or beat 2 half-time. Hats: straight 8ths.
 - bar_sequence length MUST equal total bars.
-- Use "silent" for "no drums" sections."""
+- Use "silent" for "no drums" sections.
+
+GENRE-SPECIFIC DRUM RULES (follow these exactly):
+- jazzhouse: Kick on EVERY beat (0,1,2,3). Clap on 1 and 3. VERY quiet 16th hats (velocity 15-25, never above 30). Ride on 0 and 2. This is four-on-the-floor — do NOT skip kicks.
+- progressive_house: Same as jazzhouse — kick on every beat, clap 1+3, quiet 16th hats (velocity 15-25).
+- techno: Kick on every beat, clap 1+3, quiet 16th hats (velocity 20-35).
+- trap: Kick on 0 and 2 (sparse). Clap on 2 (half-time). Straight 8th hats.
+- boombap: Kick on 0. Snare on 1 and 3. Simple 8th hats.
+- drill: Kick on 0. Clap on 1 and 3. 16th hats.
+- rnb: Soft kick on 0. Snare on 1 and 3. Gentle 8th hats.
+- melodic_trap: Kick on 0 and 2. Clap on 1 and 3. Simple 8th hats."""
 
 
 def plan_all(prompt, search_results, nbars, arrangement,

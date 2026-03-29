@@ -109,17 +109,40 @@ def main(prompt, genre, bpm, bars, loop_start, loop_end,
         except Exception:
             drum_data = None
 
-    selected = results[best_idx]
-    click.echo(f'  Selected: {selected["title"]} ({selected["duration_str"]})')
+    # Step 4: Download + drum check (try next result if drums detected)
+    from sampleflip.drum_check import has_drums as check_drums
 
-    # Step 4: Download
-    click.echo(f'\nDownloading...')
-    try:
+    sample_path = None
+    tried = set()
+    candidates = [best_idx] + [i for i in range(len(results)) if i != best_idx]
+
+    for idx in candidates:
+        if idx in tried:
+            continue
+        tried.add(idx)
+        selected = results[idx]
+        click.echo(f'\n  Trying: {selected["title"]} ({selected["duration_str"]})')
+
+        try:
+            sample_path, size_mb = download_youtube(selected['url'])
+            click.echo(f'  Downloaded ({size_mb:.1f} MB)')
+        except RuntimeError as e:
+            click.echo(f'  Download failed: {e}')
+            continue
+
+        drums_found, drum_score, drum_details = check_drums(sample_path)
+        if drums_found:
+            click.echo(f'  Drums detected (score={drum_score:.2f}: {drum_details}) — skipping')
+            sample_path = None
+            continue
+        else:
+            click.echo(f'  Clean sample (score={drum_score:.2f}) — using it')
+            break
+
+    if sample_path is None:
+        click.echo('All results contain drums. Using last downloaded anyway.', err=True)
+        selected = results[best_idx]
         sample_path, size_mb = download_youtube(selected['url'])
-        click.echo(f'  Done ({size_mb:.1f} MB)')
-    except RuntimeError as e:
-        click.echo(f'Download failed: {e}', err=True)
-        raise SystemExit(1)
 
     # Step 5: Write drum JSON
     drums_json = None

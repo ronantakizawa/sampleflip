@@ -121,7 +121,7 @@ GENRE_CONFIGS = {
         'clap_layer': True, 'clap_gain': 0.35,
         'bass_type': 'sine_sub', 'bass_lpf': 180, 'bass_gain_db': 0.0,
         'bass_comp': (-14, 2.5, 8, 120),
-        'mix': {'drums': 0.65, 'bass': 0.15, 'sample': 0.40, 'perc': 0.00, 'fx': 0.0, 'vinyl': 0.02},
+        'mix': {'drums': 0.75, 'bass': 0.15, 'sample': 0.40, 'perc': 0.12, 'fx': 0.0, 'vinyl': 0.02},
         'sc_depth': 0.70,
         'master': {'hpf': 25, 'lpf': 18000, 'comp_thresh': -14, 'comp_ratio': 2.0},
         'sample_hpf': (100, 180),
