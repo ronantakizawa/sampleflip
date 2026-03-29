@@ -341,7 +341,7 @@ def _score_loop_quality(audio, sr):
 def _find_loop_pairs(beats_sec, beat_feats, target_bars, target_bpm,
                      bar_tolerance=0.15, top_n=10, raw_audio=None, sr=SR):
     """Find beat pairs whose gap = target_bars at target_bpm with minimal
-    feature distance + musical quality. Returns list of (score, start_beat_idx, end_beat_idx)."""
+    feature distance. Returns list of (score, start_beat_idx, end_beat_idx)."""
     beat_dur = 60.0 / target_bpm
     target_dur = target_bars * 4 * beat_dur
     tol = target_dur * bar_tolerance
@@ -356,25 +356,19 @@ def _find_loop_pairs(beats_sec, beat_feats, target_bars, target_bpm,
             if gap > target_dur + tol:
                 break
             # L1 distance (seamlessness) — lower = better loop boundary
-            l1_dist = float(np.sum(np.abs(beat_feats[i] - beat_feats[j])))
-
-            # Musical quality score — higher = better content
-            quality = 0.5  # default if no audio
-            if raw_audio is not None:
-                seg_start = int(beats_sec[i] * sr)
-                seg_end = int(beats_sec[j] * sr)
-                if seg_end <= len(raw_audio):
-                    segment = raw_audio[seg_start:seg_end]
-                    quality = _score_loop_quality(segment, sr)
-
-            # Combined score: balance seamlessness with quality
-            score = l1_dist * 0.5 + (1.0 - quality) * 3.0
+            score = float(np.sum(np.abs(beat_feats[i] - beat_feats[j])))
 
             # Energy penalty for quiet segments
             seg_rms = beat_feats[i:j+1, -1].mean()
             if seg_rms < 0.1:
                 score += 5.0
             pairs.append((score, i, j))
+
+            # Cap candidates to avoid O(n^2) blowup on long samples
+            if len(pairs) >= 50:
+                break
+        if len(pairs) >= 50:
+            break
 
     pairs.sort(key=lambda x: x[0])
     return pairs[:top_n]
@@ -548,7 +542,7 @@ def extract_loop_auto(raw_sample, sr=SR, target_bpm=None):
     best_n_bars = 4
     for try_bars in [4, 2, 8]:
         pairs = _find_loop_pairs(beats_sec, beat_feats, try_bars, detected_bpm,
-                                  bar_tolerance=0.15, raw_audio=raw_sample, sr=sr)
+                                  bar_tolerance=0.15, sr=sr)
         if pairs:
             print(f'    {try_bars}-bar candidates: {len(pairs)} '
                   f'(best dist={pairs[0][0]:.3f})')
@@ -560,7 +554,7 @@ def extract_loop_auto(raw_sample, sr=SR, target_bpm=None):
         # Relax tolerance
         for try_bars in [4, 2]:
             pairs = _find_loop_pairs(beats_sec, beat_feats, try_bars, detected_bpm,
-                                      bar_tolerance=0.30, raw_audio=raw_sample, sr=sr)
+                                      bar_tolerance=0.30, sr=sr)
             if pairs:
                 best_pairs = pairs
                 best_n_bars = try_bars
