@@ -199,3 +199,143 @@ def pick_bass_pattern(prompt, genre, chords_description=None):
     valid = ['root_only', 'root_octave', 'four_pulse', 'bounce', 'walking', 'drill_slide']
     pat = result.get('bass_pattern', 'root_only')
     return pat if pat in valid else 'root_only'
+
+
+# ── 5. Batched: plan + pick result + drums + bass in ONE call ──
+
+BATCH_SYSTEM = """You are a beat production AI. Given a user's description and YouTube search results, do ALL of the following in one response.
+
+Return ONLY valid JSON with these 4 keys:
+
+{
+  "plan": {
+    "genre": "one of: trap, boombap, jazzhouse, progressive_house, rnb, drill, melodic_trap, 2hollis, techno, breakcore",
+    "bpm": <number>,
+    "search_query": "YouTube query to find a sample loop (include 'loop', 'sample pack', 'free')",
+    "name": "short_beat_name"
+  },
+  "pick": <1-based index of best YouTube result for sampling>,
+  "bass_pattern": "one of: root_only, root_octave, four_pulse, bounce, walking, drill_slide",
+  "drums": {
+    "patterns": {
+      "A": [[beat, note, vel], ...],
+      "B": [[beat, note, vel], ...],
+      "silent": []
+    },
+    "bar_sequence": ["pattern_id", ...]
+  }
+}
+
+GENRE BPM RANGES:
+trap: 140-160, boombap: 75-95, jazzhouse: 120-128, progressive_house: 126-132,
+rnb: 65-85, drill: 138-144, melodic_trap: 135-150, 2hollis: 140-160, techno: 128-140, breakcore: 160-180
+
+SEARCH QUERY RULES:
+- Target actual sample packs, loop kits, melody loops (NOT tutorials or full songs)
+- Include "loop", "sample pack", "free"
+- Match the mood/vibe
+
+PICK RULES:
+- Pick the result most likely to be an actual sample/loop (not a tutorial or full song)
+- Prefer short duration (<5 min), titles with "loop kit", "sample pack", "free"
+
+BASS PATTERN OPTIONS:
+- root_only (simplest), root_octave (boom-bap), four_pulse (house), bounce (trap), walking (R&B), drill_slide (drill)
+
+DRUM RULES:
+- GM notes: 36=Kick 38=Snare 39=Clap 42=Closed HH 46=Open HH 49=Crash 51=Ride 37=Rim
+- Beats 0-3.75 in 4/4. Subdivisions: 0.5=8th, 0.25=16th. NO 32nd notes.
+- Only 2 patterns (A and B). B is slight variation of A.
+- NO fills, NO rolls, NO ghost notes. Max 12 events per pattern.
+- Kick: 1-2 hits/bar. Clap: beat 1+3 or beat 2 half-time. Hats: straight 8ths.
+- bar_sequence length MUST equal total bars.
+- Use "silent" for "no drums" sections."""
+
+
+def plan_all(prompt, search_results, nbars, arrangement,
+             genre_override=None, bpm_override=None):
+    """Single LLM call that plans the beat, picks the sample, generates drums and bass.
+
+    Args:
+        prompt: user's beat description
+        search_results: list of YouTube results [{title, duration_str, channel}, ...]
+        nbars: total bars in song
+        arrangement: list of (name, start, end, kick_on, fx) tuples
+        genre_override: force genre
+        bpm_override: force BPM
+
+    Returns: dict with keys: plan, pick, bass_pattern, drums
+    """
+    # Format search results
+    listings = []
+    for i, r in enumerate(search_results, 1):
+        listings.append(f'{i}. "{r["title"]}" ({r["duration_str"]}) — {r["channel"]}')
+
+    # Format arrangement
+    arr_lines = []
+    for sec in arrangement:
+        name, start, end, kick_on, fx = sec
+        drums = 'full drums' if kick_on else 'no drums'
+        arr_lines.append(f'  Bars {start}-{end-1}: {name} ({drums})')
+
+    user_msg = f"""User wants: {prompt}
+
+YouTube search results:
+{chr(10).join(listings)}
+
+Arrangement ({nbars} total bars):
+{chr(10).join(arr_lines)}"""
+
+    if genre_override:
+        user_msg += f'\n\nNote: genre must be {genre_override}'
+    if bpm_override:
+        user_msg += f'\n\nNote: BPM must be {bpm_override}'
+
+    result = _call(BATCH_SYSTEM, user_msg, max_tokens=8192)
+
+    # Apply overrides
+    if genre_override:
+        result['plan']['genre'] = genre_override
+    if bpm_override:
+        result['plan']['bpm'] = bpm_override
+
+    # Validate pick index
+    pick_idx = int(result.get('pick', 1)) - 1
+    result['pick'] = max(0, min(pick_idx, len(search_results) - 1))
+
+    # Validate bass pattern
+    valid_bass = ['root_only', 'root_octave', 'four_pulse', 'bounce', 'walking', 'drill_slide']
+    if result.get('bass_pattern') not in valid_bass:
+        result['bass_pattern'] = 'root_only'
+
+    # Validate drums
+    drums = result.get('drums', {})
+    patterns = drums.get('patterns', {})
+    bar_sequence = drums.get('bar_sequence', [])
+
+    if 'silent' not in patterns:
+        patterns['silent'] = []
+    if len(bar_sequence) < nbars:
+        last = bar_sequence[-1] if bar_sequence else list(patterns.keys())[0]
+        bar_sequence.extend([last] * (nbars - len(bar_sequence)))
+    bar_sequence = bar_sequence[:nbars]
+
+    valid_ids = set(patterns.keys())
+    first_id = [k for k in patterns if k != 'silent'][0] if len(patterns) > 1 else 'silent'
+    for i, pid in enumerate(bar_sequence):
+        if pid not in valid_ids:
+            bar_sequence[i] = first_id
+
+    for pat_id in patterns:
+        clean = []
+        for ev in patterns[pat_id]:
+            if isinstance(ev, (list, tuple)) and len(ev) >= 3:
+                beat = max(0.0, min(3.875, float(ev[0])))
+                note = int(ev[1])
+                vel = max(1, min(127, int(ev[2])))
+                if note in {36, 37, 38, 39, 42, 46, 49, 51, 56}:
+                    clean.append([beat, note, vel])
+        patterns[pat_id] = clean
+
+    result['drums'] = {'patterns': patterns, 'bar_sequence': bar_sequence}
+    return result

@@ -36,27 +36,23 @@ def main(prompt, genre, bpm, bars, loop_start, loop_end,
 
       sampleflip "aggressive drill beat" --bpm 142
     """
-    from sampleflip.agent import plan_beat, pick_best_result, generate_drums, pick_bass_pattern
+    from sampleflip.agent import plan_beat, plan_all
     from sampleflip.search import search_youtube
     from sampleflip.download import download_youtube
     from sampleflip.render import render_beat
 
-    # Step 1: LLM plans the beat
+    # Step 1: Quick LLM call to get search query
     click.echo(f'\nPlanning beat...')
     try:
-        plan = plan_beat(prompt, genre_override=genre, bpm_override=bpm)
+        quick_plan = plan_beat(prompt, genre_override=genre, bpm_override=bpm)
     except Exception as e:
         click.echo(f'Error: {e}', err=True)
         click.echo('Make sure ANTHROPIC_API_KEY is set.', err=True)
         raise SystemExit(1)
 
-    g = plan['genre']
-    b = plan['bpm']
-    q = plan['search_query']
-    name = plan['name']
-
-    click.echo(f'  Genre: {g} | BPM: {b} | Name: {name}')
-    click.echo(f'  Query: "{q}"')
+    g = quick_plan['genre']
+    q = quick_plan['search_query']
+    click.echo(f'  Genre: {g} | Query: "{q}"')
 
     # Step 2: Search YouTube
     click.echo(f'\nSearching YouTube...')
@@ -70,12 +66,48 @@ def main(prompt, genre, bpm, bars, loop_start, loop_end,
         click.echo('No results found. Try a different description.', err=True)
         raise SystemExit(1)
 
-    # Step 3: LLM picks the best result
-    click.echo(f'  Found {len(results)} results, picking best...')
+    click.echo(f'  Found {len(results)} results')
+
+    # Step 3: Batched LLM call — pick result + drums + bass in ONE call
+    import sys
+    core_dir = os.path.join(os.path.dirname(__file__), 'core')
+    if core_dir not in sys.path:
+        sys.path.insert(0, core_dir)
+    from sampleflip.core.render_beat import GENRE_CONFIGS
+    cfg = GENRE_CONFIGS[g]
+    nbars_actual = bars or cfg['bars']
+    arrangement = cfg['arrangement']
+
+    click.echo(f'Generating drums + picking sample (single LLM call)...')
     try:
-        best_idx = pick_best_result(results, g, prompt)
-    except Exception:
-        best_idx = 0  # fallback to first result
+        batch = plan_all(prompt, results, nbars_actual, arrangement,
+                         genre_override=genre, bpm_override=bpm)
+        b = batch['plan']['bpm']
+        name = batch['plan']['name']
+        best_idx = batch['pick']
+        bass_pat = batch['bass_pattern']
+        drum_data = batch['drums']
+
+        n_pats = len([k for k in drum_data['patterns'] if k != 'silent'])
+        click.echo(f'  BPM: {b} | Name: {name}')
+        click.echo(f'  Bass: {bass_pat} | Drums: {n_pats} patterns')
+    except Exception as e:
+        click.echo(f'  Batched call failed ({e}), falling back to individual calls')
+        from sampleflip.agent import pick_best_result, generate_drums, pick_bass_pattern
+        b = quick_plan['bpm']
+        name = quick_plan['name']
+        try:
+            best_idx = pick_best_result(results, g, prompt)
+        except Exception:
+            best_idx = 0
+        try:
+            bass_pat = pick_bass_pattern(prompt, g)
+        except Exception:
+            bass_pat = None
+        try:
+            drum_data = generate_drums(prompt, g, b, nbars_actual, arrangement)
+        except Exception:
+            drum_data = None
 
     selected = results[best_idx]
     click.echo(f'  Selected: {selected["title"]} ({selected["duration_str"]})')
@@ -89,38 +121,16 @@ def main(prompt, genre, bpm, bars, loop_start, loop_end,
         click.echo(f'Download failed: {e}', err=True)
         raise SystemExit(1)
 
-    # Step 5: LLM picks bass pattern
-    click.echo(f'\nDesigning bass pattern...')
-    try:
-        bass_pat = pick_bass_pattern(prompt, g)
-        click.echo(f'  Bass: {bass_pat}')
-    except Exception:
-        bass_pat = None  # use genre default
-
-    # Step 6: LLM generates custom drum pattern
-    # Need arrangement from genre config to know where sections are
-    import sys
-    core_dir = os.path.join(os.path.dirname(__file__), 'core')
-    if core_dir not in sys.path:
-        sys.path.insert(0, core_dir)
-    from sampleflip.core.render_beat import GENRE_CONFIGS
-    cfg = GENRE_CONFIGS[g]
-    nbars_actual = bars or cfg['bars']
-    arrangement = cfg['arrangement']
-
-    click.echo(f'Generating drum pattern...')
+    # Step 5: Write drum JSON
     drums_json = None
-    try:
-        drum_data = generate_drums(prompt, g, b, nbars_actual, arrangement)
-        n_pats = len([k for k in drum_data['patterns'] if k != 'silent'])
-        click.echo(f'  Created {n_pats} patterns for {nbars_actual} bars')
-
-        # Write to temp JSON
+    if drum_data:
         drums_json = os.path.join(tempfile.gettempdir(), f'sampleflip_drums_{name}.json')
         with open(drums_json, 'w') as f:
             json.dump(drum_data, f)
-    except Exception as e:
-        click.echo(f'  Drum generation failed ({e}), using genre defaults')
+
+    # Step 6: Set bass pattern
+    if bass_pat:
+        os.environ['SAMPLEFLIP_BASS_PATTERN'] = bass_pat
 
     # Step 7: Generate beat
     click.echo(f'\nGenerating {g} beat: "{name}"...\n')

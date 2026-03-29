@@ -75,7 +75,7 @@ GENRE_CONFIGS = {
         'clap_layer': True, 'clap_gain': 0.45,
         'bass_type': '808', 'bass_lpf': 900, 'bass_gain_db': 0.0,
         'bass_comp': (-12, 4.0, 2, 80),
-        'mix': {'drums': 0.50, 'bass': 0.30, 'sample': 0.65, 'perc': 0.08, 'fx': 0.22, 'vinyl': 0.0},
+        'mix': {'drums': 0.60, 'bass': 0.40, 'sample': 0.65, 'perc': 0.08, 'fx': 0.22, 'vinyl': 0.0},
         'sc_depth': 0.75,
         'master': {'hpf': 30, 'lpf': 18000, 'comp_thresh': -10, 'comp_ratio': 3.0},
         'sample_hpf': (100, 160),
@@ -1093,14 +1093,25 @@ def render(sample_path, name, genre='trap', bpm_hint=None, nbars=None,
 
     rng = np.random.RandomState(hash(name) % (2**31))
 
-    # Room IR
+    # Room IR (cached per genre config)
     rx, ry, rz, mat, order, ir_len, _ = cfg['room']
-    room = pra.ShoeBox([rx, ry, rz], fs=SR, materials=pra.Material(mat), max_order=order)
-    room.add_source([rx/2, ry/2, 1.5])
-    room.add_microphone(np.array([[rx/2+0.2, ry/2+0.2, 1.6]]).T)
-    room.compute_rir()
-    room_ir = np.array(room.rir[0][0], dtype=np.float32)[:int(SR * ir_len)]
-    room_ir /= (np.abs(room_ir).max() + 1e-9)
+    ir_cache_key = f'{rx}_{ry}_{rz}_{mat}_{order}_{ir_len}'
+    ir_cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.ir_cache')
+    ir_cache_path = os.path.join(ir_cache_dir, f'ir_{ir_cache_key}.npy')
+
+    if os.path.exists(ir_cache_path):
+        room_ir = np.load(ir_cache_path)
+        print(f'  Room IR: loaded from cache')
+    else:
+        room = pra.ShoeBox([rx, ry, rz], fs=SR, materials=pra.Material(mat), max_order=order)
+        room.add_source([rx/2, ry/2, 1.5])
+        room.add_microphone(np.array([[rx/2+0.2, ry/2+0.2, 1.6]]).T)
+        room.compute_rir()
+        room_ir = np.array(room.rir[0][0], dtype=np.float32)[:int(SR * ir_len)]
+        room_ir /= (np.abs(room_ir).max() + 1e-9)
+        os.makedirs(ir_cache_dir, exist_ok=True)
+        np.save(ir_cache_path, room_ir)
+        print(f'  Room IR: computed and cached')
 
     # --- Generate drum patterns (LLM or fallback) ---
     print(f'\nStep 3: Programming drums ...')
