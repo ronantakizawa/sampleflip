@@ -63,16 +63,11 @@ def gb_underwater(audio, sr, cutoff=800, wet=0.85):
     return (audio * (1 - wet) + filtered * wet).astype(np.float32)
 
 
-# Default FX pool for transition points
+# Default FX pool — kept simple
 DEFAULT_FX_POOL = [
     ('underwater', gb_underwater, {'beat_offset': 0, 'n_beats': 4, 'cutoff': 800}),
-    ('underwater', gb_underwater, {'beat_offset': 0, 'n_beats': 4, 'cutoff': 600}),
     ('underwater', gb_underwater, {'beat_offset': 0, 'n_beats': 2, 'cutoff': 1000}),
     ('reverse',  gb_reverse,  {'beat_offset': 2, 'n_beats': 2}),
-    ('stutter4', gb_stutter,  {'beat_offset': 3, 'n_beats': 1, 'divisions': 4}),
-    ('stutter6', gb_stutter,  {'beat_offset': 3, 'n_beats': 1, 'divisions': 6}),
-    ('stutter8', gb_stutter,  {'beat_offset': 2, 'n_beats': 2, 'divisions': 8}),
-    ('gate',     gb_gate,     {'beat_offset': 0, 'n_beats': 4, 'rate': 8}),
 ]
 
 
@@ -114,9 +109,9 @@ def apply_gross_beat(samp_out, sr, bar_dur, nbars, transition_bars,
             samp_out[start:start + len(processed)] = processed
         log.append(f'    bar {bar}+{beat_offset}: {fx_name} ({n_beats} beats)')
 
-    # Randomly decide how many transitions get an effect
-    n_fx = rng.randint(1, len(transition_bars) + 1)
-    chosen = sorted(rng.choice(len(transition_bars), size=n_fx, replace=False))
+    # Limit to max 2 FX per song to keep it simple
+    n_fx = min(2, rng.randint(1, len(transition_bars) + 1))
+    chosen = sorted(rng.choice(len(transition_bars), size=min(n_fx, len(transition_bars)), replace=False))
 
     for idx in chosen:
         bar = transition_bars[idx]

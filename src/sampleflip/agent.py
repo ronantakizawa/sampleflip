@@ -85,14 +85,14 @@ def pick_best_result(results, genre, prompt):
 
 # ── 3. Generate drum pattern ──
 
-DRUMS_SYSTEM = """You are an expert drum programmer. Generate a drum pattern as MIDI events.
+DRUMS_SYSTEM = """You are a drum programmer. Generate a SIMPLE drum pattern as MIDI events.
 
 RULES:
 - Positions are BEATS in a 4/4 bar (0.0 to 3.75)
 - Beat 0=the "1", Beat 1=the "2", Beat 2=the "3", Beat 3=the "4"
-- Subdivisions: 0.5=8th, 0.25=16th, 0.125=32nd
+- Subdivisions: 0.5=8th note, 0.25=16th note. Do NOT use 32nd notes (0.125).
 - Each event: [beat_position, gm_drum_note, velocity]
-- Velocity: ghost=30-40, normal=70-90, accent=95-110
+- Velocity: normal=80-100
 
 GM DRUM NOTES:
   36=Kick  38=Snare  39=Clap  42=Closed HH  46=Open HH  49=Crash  51=Ride  37=Rim
@@ -102,16 +102,20 @@ OUTPUT FORMAT:
   "patterns": {
     "A": [[beat, note, vel], ...],
     "B": [[beat, note, vel], ...],
-    "fill": [[beat, note, vel], ...],
     "silent": []
   },
   "bar_sequence": ["pattern_id", ...]
 }
 
-REQUIREMENTS:
-- 2-4 main patterns (A, B, C) with subtle differences
-- 1-2 fill patterns for transitions
+CRITICAL — KEEP IT SIMPLE:
+- Only 2 main patterns (A and B). B is a slight variation of A.
+- NO fills, NO rolls, NO ghost notes, NO 32nd subdivisions
+- Kick: 1-2 hits per bar max
+- Snare/Clap: on beat 1 and 3 (or just beat 2 for half-time)
+- Hi-hats: simple straight 8th notes (0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5). No 16th patterns.
+- Max 12 events per pattern
 - "silent" pattern (empty) for intros/outros
+- The beat should feel spacious and minimal, not busy
 - bar_sequence length MUST equal total bars requested
 - Use "silent" for intro/outro bars, fills before section changes
 - Match the genre and vibe described"""
